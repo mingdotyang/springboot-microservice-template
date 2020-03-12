@@ -1,0 +1,10 @@
+spring:
+  application:
+    name: {{service.code}}
+  profiles:
+    active: development
+
+server:
+  port: 8080
+
+

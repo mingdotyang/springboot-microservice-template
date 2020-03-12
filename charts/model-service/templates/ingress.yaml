@@ -1,0 +1,46 @@
+{{- if .Values.ingress.enabled -}}
+{{- $serviceName := .Values.service.name -}}
+{{- $servicePort := .Values.service.port -}}
+{{- $releaseName := .Release.Name -}}
+apiVersion: extensions/v1beta1
+kind: Ingress
+metadata:
+  name: {{ .Release.Name }}
+  labels:
+{{ include "service.labels.release" . | indent 4 }}
+{{ include "service.labels.standard" . | indent 4 }}
+  {{- with .Values.ingress.annotations }}
+  annotations:
+    {{- toYaml . | nindent 4 }}
+  {{- end }}
+spec:
+  {{- with .Values.tls }}
+  tls: 
+    {{- toYaml . | nindent 4 }}
+  {{- else }}
+  tls:
+    - hosts:
+        - {{ .Values.ingress.host | quote }}
+      secretName: {{ .Values.ingress.secretName | default "tls-12301" }}
+  {{- end }}
+  rules:
+  {{- if .Values.ingress.hosts }}
+    {{- range .Values.ingress.hosts }}
+    - host: {{ . | quote }}
+      http:
+        paths: 
+          - backend:
+              serviceName: {{ $serviceName | default $releaseName }}
+              servicePort: {{ $servicePort }}
+            path: /
+    {{- end }}
+  {{- else }}
+    - host: {{ .Values.ingress.host | quote }}
+      http:
+        paths: 
+          - backend:
+              serviceName: {{ $serviceName | default $releaseName }}
+              servicePort: {{ $servicePort }}
+            path: /
+  {{- end }}
+{{- end }}

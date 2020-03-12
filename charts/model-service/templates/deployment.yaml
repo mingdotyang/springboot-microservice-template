@@ -1,0 +1,159 @@
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: {{ .Release.Name }}
+  labels:
+{{ include "service.labels.standard" . | indent 4 }}
+{{ include "service.labels.release" . | indent 4 }}
+spec:
+  {{- if (not .Values.hpa.enabled) }}
+  replicas: {{ .Values.replicaCount }}
+  {{- end }}
+  {{- if .Values.persistence.enabled }}
+  {{- if .Values.persistence.dynamic }}
+  volumeClaimTemplates:
+    - metadata:
+        name: "{{ .Release.Name }}-pvc"
+      spec:
+        accessModes:
+          - {{ .Values.persistence.accessMode | default "ReadWriteMany" }}
+        storageClassName: alicloud-nas
+        resources:
+          requests:
+            storage: {{ .Values.persistence.requestStorage | default "1Gi" }}
+  {{- end }}
+  {{- end }}
+  selector:
+    matchLabels:
+{{ include "service.labels.release" . | indent 6 }}
+  template:
+    metadata:
+      labels:
+{{ include "service.labels.standard" . | indent 8 }}
+{{ include "service.labels.release" . | indent 8 }}
+    spec:
+    {{- if .Values.imagePullSecrets }}
+      imagePullSecrets:
+        - name: {{ .Values.imagePullSecrets | quote }}
+    {{- end }}
+      securityContext:
+        runAsUser: {{ .Values.runAsUser | default 42000 }}
+      containers:
+        - name: {{ include "app.name" . }}
+          image: "{{ .Values.image.repo }}:{{ include "app.version" . }}"
+          imagePullPolicy: {{ .Values.image.pullPolicy }}
+          {{- with .Values.command }}
+          command:
+            {{- toYaml . | nindent 12 }}
+          {{- end }}
+          {{- with .Values.args }}
+          args:
+            {{- toYaml . | nindent 12 }}
+          {{- end }}
+          {{- if .Values.persistence.enabled }}
+          volumeMounts:
+            - name: "{{ .Release.Name }}-pvc"
+              mountPath: {{ .Values.persistence.mountPath | quote }}
+          {{- end }}
+          env:
+            - name: NODE_ENV
+              value: {{ .Values.profile }}
+            - name: SPRING_PROFILES_ACTIVE
+              value: {{ .Values.profile }}
+            {{- if .Values.log.enabled }}
+            - name: aliyun_logs_{{ .Values.log.logstore | default (include "app.name" .) }}
+              value: stdout
+            - name: aliyun_logs_app-name_tags
+              value: "app_name={{ include "app.name" . }}"
+            - name: aliyun_logs_app-version_tags
+              value: "app_version={{ include "app.version" . }}"
+            - name: aliyun_logs_app-release_tags
+              value: "app_release={{ .Release.Name }}"
+            {{- end }}
+            {{- if .Values.env }}
+            {{- range .Values.env }}
+            {{- if not (empty .value) }}
+            - name: {{ .name | quote }}
+              value: {{ .value | quote }}
+            {{- end }}
+            {{- end }}
+          {{- end }}
+          {{- with .Values.envFrom }}
+          envFrom:
+            {{- toYaml . | nindent 12 }}
+          {{- end }}
+          ports:
+          {{- with .Values.containerPorts }}
+            {{- toYaml . | nindent 12 }}
+          {{- else }}
+            - name: http
+              containerPort: {{ .Values.service.targetPort | default 8000 }}
+              protocol: TCP
+          {{- end }}          
+          {{- if .Values.readiness.enabled }}
+          readinessProbe:
+            httpGet:
+              path: {{ .Values.readiness.path | default "/actuator/health" }}
+              port: {{ .Values.readiness.port | default .Values.service.targetPort }}
+            failureThreshold: {{ .Values.readiness.failureThreshold | default 3 }}
+            initialDelaySeconds: {{ .Values.readiness.initialDelaySeconds | default 60 }}
+            periodSeconds: {{ .Values.readiness.periodSeconds | default 10 }}
+            successThreshold: {{ .Values.readiness.successThreshold | default 1 }}
+            timeoutSeconds: {{ .Values.readiness.timeoutSeconds | default 10 }}
+          {{- end }}
+          {{- with .Values.readinessProbe }}
+          readinessProbe:
+            {{- toYaml . | nindent 12 }}          
+          {{- end }}
+          {{- if .Values.liveness.enabled }}
+          livenessProbe:
+            httpGet:
+              path: {{ .Values.liveness.path | default "/actuator/health" }}
+              port: {{ .Values.liveness.port | default .Values.service.targetPort }}
+            failureThreshold: {{ .Values.liveness.failureThreshold | default 3 }}
+            initialDelaySeconds: {{ .Values.liveness.initialDelaySeconds | default 60 }}
+            periodSeconds: {{ .Values.liveness.periodSeconds | default 10 }}
+            successThreshold: {{ .Values.liveness.successThreshold | default 1 }}
+            timeoutSeconds: {{ .Values.liveness.timeoutSeconds | default 10 }}
+          {{- end }}
+          {{- with .Values.livenessProbe }}
+          livenessProbe:
+            {{- toYaml . | nindent 12 }}          
+          {{- end }}
+          resources:
+            {{- toYaml .Values.resources | nindent 12 }}
+      {{- if .Values.persistence.enabled }}
+      {{- if not .Values.persistence.dynamic }}
+      volumes:
+        - name: "{{ .Release.Name }}-pvc"
+          flexVolume:
+            driver: "alicloud/nas"
+            options:
+              server: {{ (include "nas.address" .) | quote }}
+              path: {{ .Values.persistence.path | default .Release.Name | quote }}
+              vers: "3"
+              {{- if .Values.persistence.mode }}
+              mode: {{ .Values.persistence.mode | quote }}
+              {{- end }}
+      {{- end }}
+      {{- end }}
+    {{- with .Values.affinity }}
+      affinity:
+        {{- toYaml . | nindent 8 }}
+    {{- else }}
+      affinity:
+        nodeAffinity:
+          preferredDuringSchedulingIgnoredDuringExecution:
+            - weight: 1
+              preference:
+                matchExpressions:
+                  - key: easybest.io/memory
+                    operator: In
+                    values:
+                      - {{ if .Values.projectType }}{{ if eq .Values.projectType "java" }}high{{ else }}medium{{ end }}{{ else }}medium{{ end }}
+                      - scaling
+    {{- end }}
+    {{- with .Values.tolerations }}
+      tolerations:
+        {{- toYaml . | nindent 8 }}
+    {{- end }}
