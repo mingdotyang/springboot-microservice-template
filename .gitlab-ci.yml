@@ -1,4 +1,4 @@
-image: easybest/cibase
+image: registry.cn-beijing.aliyuncs.com/basicciimage/cibase:0.0.6
 
 stages:
 - mvn-package
